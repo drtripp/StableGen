@@ -613,78 +613,145 @@ def export_emit_image(context, to_export, camera_id=None, bg_color=(0.5, 0.5, 0.
         original_materials = {}
         original_active_material = {}
         temporary_materials = {}
+        hidden_restore = {}
 
         # Check if there is BSDF applied
 
         # We need to temporarily disconnect BDSF nodes and connect their inputs directly to the output
+
+        def _visible_collections():
+            visible = set()
+            def _walk(layer_collection, parent_hidden=False):
+                hidden = (
+                    parent_hidden
+                    or layer_collection.exclude
+                    or layer_collection.hide_viewport
+                    or layer_collection.collection.hide_viewport
+                )
+                if not hidden:
+                    visible.add(layer_collection.collection)
+                for child in layer_collection.children:
+                    _walk(child, hidden)
+            _walk(context.view_layer.layer_collection)
+            return visible
+
+        visible_collections = _visible_collections()
+
+        def _convert_material_to_emit(mat):
+            mat.use_nodes = True
+            mat.blend_method = 'OPAQUE'
+            if hasattr(mat, "use_screen_refraction"):
+                mat.use_screen_refraction = False
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+
+            output = None
+            for node in nodes:
+                if node.type == 'OUTPUT_MATERIAL':
+                    output = node
+                    break
+            if not output:
+                output = nodes.new("ShaderNodeOutputMaterial")
+
+            surface = output.inputs.get("Surface") or output.inputs[0]
+            color_socket = None
+            default_color = tuple(getattr(mat, "diffuse_color", (fallback_color[0], fallback_color[1], fallback_color[2], 1.0)))
+
+            def _use_principled_base_color(principled_node):
+                nonlocal color_socket, default_color
+                base_color = principled_node.inputs.get("Base Color")
+                if not base_color:
+                    return
+                if base_color.links:
+                    color_socket = base_color.links[0].from_socket
+                else:
+                    default_color = tuple(base_color.default_value)
+
+            if surface.links:
+                before_output = surface.links[0].from_node
+                if before_output.type == 'BSDF_PRINCIPLED':
+                    _use_principled_base_color(before_output)
+                elif before_output.type == 'EMISSION':
+                    emission_color = before_output.inputs.get("Color")
+                    if emission_color:
+                        if emission_color.links:
+                            color_socket = emission_color.links[0].from_socket
+                        else:
+                            default_color = tuple(emission_color.default_value)
+                else:
+                    if before_output.outputs and before_output.outputs[0].type != 'SHADER':
+                        color_socket = before_output.outputs[0]
+                    if not "visibility" in str(camera_id):
+                        color2 = before_output.inputs.get("Color2")
+                        if color2:
+                            color2.default_value = (fallback_color[0], fallback_color[1], fallback_color[2], 1.0)
+            else:
+                for node in nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        _use_principled_base_color(node)
+                        break
+
+            for link in list(surface.links):
+                links.remove(link)
+
+            emission_node = nodes.new("ShaderNodeEmission")
+            emission_node.location = (output.location.x - 200, output.location.y)
+            emission_node.inputs["Strength"].default_value = 1.0
+            if color_socket:
+                links.new(color_socket, emission_node.inputs["Color"])
+            else:
+                emission_node.inputs["Color"].default_value = default_color
+            links.new(emission_node.outputs[0], surface)
+
+        def _is_emit_visible(obj):
+            try:
+                is_visible = obj.visible_get(view_layer=context.view_layer)
+            except TypeError:
+                is_visible = obj.visible_get()
+            except AttributeError:
+                is_visible = not obj.hide_get()
+            return (
+                obj.type == 'MESH'
+                and is_visible
+                and not obj.hide_get()
+                and not obj.hide_viewport
+                and not obj.hide_render
+                and (
+                    not obj.users_collection
+                    or any(collection in visible_collections for collection in obj.users_collection)
+                )
+            )
+
+        to_export = [obj for obj in to_export if _is_emit_visible(obj)]
+        print("[StableGen] Emit render objects:", ", ".join(obj.name for obj in to_export))
+        export_set = set(to_export)
+        for obj in context.scene.objects:
+            if obj.type == 'MESH' and obj not in export_set:
+                hidden_restore[obj] = obj.hide_render
+                obj.hide_render = True
 
         for obj in to_export:
             # Store original materials
             original_materials[obj] = list(obj.data.materials)
             original_active_material[obj] = obj.active_material
 
-            # Copy active material and switch to it
-            mat = obj.active_material
-            if not mat:
-                continue
-            mat_copy = mat.copy()
-
-            # Clear materials and assign temp material
+            # Copy every material slot so face material assignments survive.
             obj.data.materials.clear()
-            obj.data.materials.append(mat_copy)
+            mat_copies = []
+            source_materials = original_materials[obj]
+            if not source_materials:
+                source_materials = [None]
+            for mat in source_materials:
+                if mat:
+                    mat_copy = mat.copy()
+                else:
+                    mat_copy = bpy.data.materials.new(name="_SG_Emit_Fallback")
+                obj.data.materials.append(mat_copy)
+                mat_copies.append(mat_copy)
+                _convert_material_to_emit(mat_copy)
 
             # Store the temporary material for later deletion
-            temporary_materials[obj] = mat_copy
-
-            # Enable use of nodes
-            mat_copy.use_nodes = True
-            nodes = mat_copy.node_tree.nodes
-            links = mat_copy.node_tree.links
-
-            # Find the output node
-            output = None
-            for node in nodes:
-                if node.type == 'OUTPUT_MATERIAL':
-                    output = node
-                    break
-
-            if not output or not output.inputs[0].links:
-                continue
-
-                # Check the type of the node which connects to output
-            before_output = output.inputs[0].links[0].from_node
-            if before_output.type == 'BSDF_PRINCIPLED':
-                # Find the last color mix node
-                color_mix = output.inputs[0].links[0].from_node.inputs[0].links[0].from_node
-                # Set color 2 to fallback color
-                if not "visibility" in str(camera_id):
-                    color_mix.inputs["Color2"].default_value = (fallback_color[0], fallback_color[1], fallback_color[2], 1.0)
-            else:
-                # Already a color mix node
-                color_mix = before_output
-                # Set color 2 to fallback color
-                if not "visibility" in str(camera_id):
-                    color_mix.inputs["Color2"].default_value = (fallback_color[0], fallback_color[1], fallback_color[2], 1.0)
-
-                # Blender 5.0+: Wrap color output with Emission shader so the Emit pass picks it up
-                if bpy.app.version >= (5, 0, 0):
-                    emission_node = nodes.new("ShaderNodeEmission")
-                    emission_node.location = (output.location.x - 200, output.location.y)
-                    links.new(color_mix.outputs[0], emission_node.inputs["Color"])
-                    links.new(emission_node.outputs[0], output.inputs["Surface"])
-                continue
-
-            # Find the last color mix node
-            color_mix = output.inputs[0].links[0].from_node.inputs[0].links[0].from_node
-            # Connect the color mix node directly to the output
-            if bpy.app.version >= (5, 0, 0):
-                # Blender 5.0+: Wrap in Emission shader for Emit pass
-                emission_node = nodes.new("ShaderNodeEmission")
-                emission_node.location = (output.location.x - 200, output.location.y)
-                links.new(color_mix.outputs[0], emission_node.inputs["Color"])
-                links.new(emission_node.outputs[0], output.inputs["Surface"])
-            else:
-                links.new(color_mix.outputs[0], output.inputs[0])
+            temporary_materials[obj] = mat_copies
 
         output_dir = get_dir_path(context, "inpaint")["visibility"] if "visibility" in str(camera_id) else get_dir_path(context, "inpaint")["render"]
         output_file = f"ctx_render{camera_id}" if camera_id is not None else "ctx_render"
@@ -783,8 +850,37 @@ def export_emit_image(context, to_export, camera_id=None, bg_color=(0.5, 0.5, 0.
             links.new(render_layers.outputs['Environment'], mix_node.inputs[2])
         links.new(mix_node.outputs[0], output_node.inputs[0])
 
-        # Render
-        bpy.ops.render.render(write_still=True)
+        # Render. If Blender raises during this pass, restore the temporary
+        # material/render state before letting the generator handle the error.
+        try:
+            bpy.ops.render.render(write_still=True)
+        except Exception:
+            for obj, hide_render in hidden_restore.items():
+                obj.hide_render = hide_render
+            context.scene.render.engine = original_engine
+            context.scene.render.film_transparent = original_film_transparent
+            context.scene.render.use_compositing = original_use_compositing
+            context.scene.render.filepath = original_filepath
+            world.use_nodes = original_use_nodes
+            world.color = original_color
+            if original_bg_node_color is not None and world.node_tree:
+                for wn in world.node_tree.nodes:
+                    if wn.type == 'BACKGROUND':
+                        wn.inputs["Color"].default_value = original_bg_node_color
+                        wn.inputs["Strength"].default_value = original_bg_node_strength
+                        break
+            bpy.context.scene.view_settings.view_transform = 'Standard'
+            for obj, materials in original_materials.items():
+                obj.data.materials.clear()
+                for mat in materials:
+                    if mat:
+                        obj.data.materials.append(mat)
+                obj.active_material = original_active_material[obj]
+            for temp_mats in temporary_materials.values():
+                for temp_mat in temp_mats:
+                    if temp_mat and temp_mat.name in bpy.data.materials:
+                        bpy.data.materials.remove(temp_mat)
+            raise
 
         # Post-processing for visibility masks
         if "visibility" in str(camera_id):
@@ -810,6 +906,9 @@ def export_emit_image(context, to_export, camera_id=None, bg_color=(0.5, 0.5, 0.
                     cv2.imwrite(final_path, expanded_mask_u8)
 
         # Restore original settings
+        for obj, hide_render in hidden_restore.items():
+            obj.hide_render = hide_render
+
         context.scene.render.engine = original_engine
         context.scene.render.film_transparent = original_film_transparent
         context.scene.render.use_compositing = original_use_compositing
@@ -827,17 +926,16 @@ def export_emit_image(context, to_export, camera_id=None, bg_color=(0.5, 0.5, 0.
         # Restore original materials
         for obj, materials in original_materials.items():
             obj.data.materials.clear()
-            # First append the original active material
-            if original_active_material[obj]:
-                obj.data.materials.append(original_active_material[obj])
             for mat in materials:
-                if mat != original_active_material[obj]:
+                if mat:
                     obj.data.materials.append(mat)
+            obj.active_material = original_active_material[obj]
 
         # Clean up temporary materials
-        for _, temp_mat in temporary_materials.items():
-            if temp_mat and temp_mat.name in bpy.data.materials:
-                bpy.data.materials.remove(temp_mat)
+        for temp_mats in temporary_materials.values():
+            for temp_mat in temp_mats:
+                if temp_mat and temp_mat.name in bpy.data.materials:
+                    bpy.data.materials.remove(temp_mat)
 
         print(f"[StableGen] Emmision render saved to: {os.path.join(output_dir, output_file)}.png")
 
@@ -1241,6 +1339,8 @@ def export_visibility(context, to_export, obj=None, camera_visibility=None, prep
         else:
             color_mix = output.inputs[0].links[0].from_node
             input = output.inputs[0]
+        if not all(name in color_mix.inputs for name in ("Fac", "Color1", "Color2")):
+            return False
         # Add equal node between color mix and bsdf
         equal = nodes.new("ShaderNodeMath")
         

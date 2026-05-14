@@ -1934,9 +1934,6 @@ class _TexturingWorkflowMixin:
         prompt[NODES['sampler']]["inputs"]["sampler_name"] = context.scene.sampler
         prompt[NODES['sampler']]["inputs"]["scheduler"] = context.scene.scheduler
         
-        # Set clip skip
-        prompt[NODES['clip_skip']]["inputs"]["stop_at_clip_layer"] = -context.scene.clip_skip
-        
         # Set the model name
         prompt[NODES['checkpoint']]["inputs"]["ckpt_name"] = context.scene.model_name
 
@@ -1952,8 +1949,17 @@ class _TexturingWorkflowMixin:
 
         current_model_out = final_lora_model_out
 
-        # Set the input for the clip skip node
-        prompt[NODES['clip_skip']]["inputs"]["clip"] = final_lora_clip_out
+        clip_skip = getattr(context.scene, "clip_skip", 1)
+        if clip_skip <= 1:
+            # CLIPSetLastLayer(-1) can produce black/NaN SDXL outputs in current
+            # ComfyUI builds. Treat clip skip 1 as the normal, unmodified CLIP.
+            if NODES['clip_skip'] in prompt:
+                del prompt[NODES['clip_skip']]
+            prompt[NODES['pos_prompt']]["inputs"]["clip"] = final_lora_clip_out
+            prompt[NODES['neg_prompt']]["inputs"]["clip"] = final_lora_clip_out
+        else:
+            prompt[NODES['clip_skip']]["inputs"]["stop_at_clip_layer"] = -clip_skip
+            prompt[NODES['clip_skip']]["inputs"]["clip"] = final_lora_clip_out
 
         # If using IPAdapter, set the model input
         _is_trellis2_input_ipadapter = (
@@ -2342,9 +2348,6 @@ class _TexturingWorkflowMixin:
         else:
             prompt[NODES['sampler']]["inputs"]["denoise"] = 1.0
         
-        # Set clip skip
-        prompt[NODES['clip_skip']]["inputs"]["stop_at_clip_layer"] = -context.scene.clip_skip
-        
         # Set upscale method and dimensions
         prompt[NODES['upscale_grid']]["inputs"]["upscale_method"] = context.scene.refine_upscale_method
         prompt[NODES['upscale_grid']]["inputs"]["width"] = context.scene.render.resolution_x
@@ -2368,8 +2371,17 @@ class _TexturingWorkflowMixin:
 
         current_model_out = final_lora_model_out
 
-        # Set the input for the clip skip node
-        prompt[NODES['clip_skip']]["inputs"]["clip"] = final_lora_clip_out
+        clip_skip = getattr(context.scene, "clip_skip", 1)
+        if clip_skip <= 1:
+            # CLIPSetLastLayer(-1) can produce black/NaN SDXL outputs in current
+            # ComfyUI builds. Treat clip skip 1 as the normal, unmodified CLIP.
+            if NODES['clip_skip'] in prompt:
+                del prompt[NODES['clip_skip']]
+            prompt[NODES['pos_prompt']]["inputs"]["clip"] = final_lora_clip_out
+            prompt[NODES['neg_prompt']]["inputs"]["clip"] = final_lora_clip_out
+        else:
+            prompt[NODES['clip_skip']]["inputs"]["stop_at_clip_layer"] = -clip_skip
+            prompt[NODES['clip_skip']]["inputs"]["clip"] = final_lora_clip_out
 
         # If using IPAdapter, set the model input
         _is_original_render_ipadapter = (

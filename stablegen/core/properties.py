@@ -1103,6 +1103,7 @@ def register_properties(update_model_list, ControlNetUnit, LoRAUnit,
         items=[
             ('all', 'All Visible', 'Texture all visible objects in the scene'),
             ('selected', 'Selected', 'Texture only selected objects'),
+            ('selected_context', 'Selected + Visible Context', 'Texture only selected objects while keeping visible meshes in Local Edit context renders'),
         ],
         default='all', update=update_parameters
     )

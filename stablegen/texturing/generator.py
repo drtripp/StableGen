@@ -88,7 +88,7 @@ class Regenerate(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         self._timer = context.window_manager.event_timer_add(1.0, window=context.window)
         # Revert to original discard angle in material nodes in case it was reset after generation
-        if context.scene.texture_objects == 'selected':
+        if context.scene.texture_objects in {'selected', 'selected_context'}:
             self._to_texture = [obj for obj in bpy.context.selected_objects if obj.type == 'MESH']
             # If empty, cancel the operation
             if not self._to_texture:
@@ -599,7 +599,7 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
         else:
             print(f"[StableGen] Regenerating images for {len(self._selected_camera_ids)} selected cameras")
 
-        if context.scene.texture_objects == 'selected':
+        if context.scene.texture_objects in {'selected', 'selected_context'}:
             self._to_texture = [obj for obj in bpy.context.selected_objects if obj.type == 'MESH']
             # If empty, cancel the operation
             if not self._to_texture:
@@ -801,7 +801,7 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     bpy.context.scene.render.resolution_x = self._original_resolution_x
                     bpy.context.scene.render.resolution_y = self._original_resolution_y
                 # Restore original visibility for non-selected objects
-                if context.scene.texture_objects == 'selected':
+                if self._original_visibility:
                     for obj in bpy.context.view_layer.objects:
                         if obj.type == 'MESH' and obj.name in self._original_visibility:
                             obj.hide_render = self._original_visibility[obj.name]
@@ -955,6 +955,41 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
         controlnet_units = self._controlnet_units
         cameras = self._cameras
 
+        def _is_viewport_visible_mesh(obj):
+            try:
+                is_visible = obj.visible_get(view_layer=context.view_layer)
+            except TypeError:
+                is_visible = obj.visible_get()
+            except AttributeError:
+                is_visible = not obj.hide_get()
+            return (
+                obj.type == 'MESH'
+                and is_visible
+                and not obj.hide_get()
+                and not obj.hide_viewport
+                and not obj.hide_render
+            )
+
+        def _render_with_visible_meshes_only(render_callback):
+            if context.scene.texture_objects not in {'all', 'selected_context'}:
+                render_callback()
+                return
+
+            visible_meshes = {
+                obj for obj in context.view_layer.objects
+                if _is_viewport_visible_mesh(obj)
+            }
+            hidden_restore = {}
+            try:
+                for obj in context.scene.objects:
+                    if obj.type == 'MESH' and obj not in visible_meshes:
+                        hidden_restore[obj] = obj.hide_render
+                        obj.hide_render = True
+                render_callback()
+            finally:
+                for obj, hide_render in hidden_restore.items():
+                    obj.hide_render = hide_render
+
         if context.scene.generation_mode in ('standard', 'regenerate_selected'):
             need_depth = (
                 any(u["unit_type"] == "depth" for u in controlnet_units)
@@ -972,7 +1007,8 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     def _render_depth(_i=_i, _cam=_cam):
                         bpy.context.scene.camera = _cam
                         with _SGCameraResolution(context, _cam):
-                            self.export_depthmap(context, camera_id=_i)
+                            _render_with_visible_meshes_only(
+                                lambda: self.export_depthmap(context, camera_id=_i))
                     self._run_on_main_thread(_render_depth)
                     if self._error:
                         return
@@ -990,9 +1026,11 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     def _render_canny(_i=_i, _cam=_cam):
                         bpy.context.scene.camera = _cam
                         with _SGCameraResolution(context, _cam):
-                            export_canny(context, camera_id=_i,
-                                         low_threshold=context.scene.canny_threshold_low,
-                                         high_threshold=context.scene.canny_threshold_high)
+                            _render_with_visible_meshes_only(
+                                lambda: export_canny(
+                                    context, camera_id=_i,
+                                    low_threshold=context.scene.canny_threshold_low,
+                                    high_threshold=context.scene.canny_threshold_high))
                     self._run_on_main_thread(_render_canny)
                     if self._error:
                         return
@@ -1014,7 +1052,8 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     def _render_normal(_i=_i, _cam=_cam):
                         bpy.context.scene.camera = _cam
                         with _SGCameraResolution(context, _cam):
-                            self.export_normal(context, camera_id=_i)
+                            _render_with_visible_meshes_only(
+                                lambda: self.export_normal(context, camera_id=_i))
                     self._run_on_main_thread(_render_normal)
                     if self._error:
                         return
@@ -1035,8 +1074,10 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     def _render_wb(_i=_i, _cam=_cam):
                         bpy.context.scene.camera = _cam
                         with _SGCameraResolution(context, _cam):
-                            export_render(context, camera_id=_i,
-                                          output_dir=workbench_dir, filename=f"render{_i}")
+                            _render_with_visible_meshes_only(
+                                lambda: export_render(
+                                    context, camera_id=_i,
+                                    output_dir=workbench_dir, filename=f"render{_i}"))
                     self._run_on_main_thread(_render_wb)
                     if self._error:
                         return
@@ -1057,8 +1098,10 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                     def _render_vp(_i=_i, _cam=_cam):
                         bpy.context.scene.camera = _cam
                         with _SGCameraResolution(context, _cam):
-                            export_viewport(context, camera_id=_i,
-                                            output_dir=viewport_dir, filename=f"viewport{_i}")
+                            _render_with_visible_meshes_only(
+                                lambda: export_viewport(
+                                    context, camera_id=_i,
+                                    output_dir=viewport_dir, filename=f"viewport{_i}"))
                     self._run_on_main_thread(_render_vp)
                     if self._error:
                         return
@@ -1087,7 +1130,50 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
                 def _render_refine(_i=_i, _cam=_cam):
                     bpy.context.scene.camera = _cam
                     with _SGCameraResolution(context, _cam):
-                        export_emit_image(context, self._to_texture, camera_id=_i)
+                        emit_targets = self._to_texture
+                        if context.scene.texture_objects == 'selected_context':
+                            def _visible_collections():
+                                visible = set()
+                                def _walk(layer_collection, parent_hidden=False):
+                                    hidden = (
+                                        parent_hidden
+                                        or layer_collection.exclude
+                                        or layer_collection.hide_viewport
+                                        or layer_collection.collection.hide_viewport
+                                    )
+                                    if not hidden:
+                                        visible.add(layer_collection.collection)
+                                    for child in layer_collection.children:
+                                        _walk(child, hidden)
+                                _walk(context.view_layer.layer_collection)
+                                return visible
+
+                            visible_collections = _visible_collections()
+
+                            def _is_visible_context_object(obj):
+                                try:
+                                    is_visible = obj.visible_get(view_layer=context.view_layer)
+                                except TypeError:
+                                    is_visible = obj.visible_get()
+                                except AttributeError:
+                                    is_visible = not obj.hide_get()
+                                return (
+                                    obj.type == 'MESH'
+                                    and is_visible
+                                    and not obj.hide_get()
+                                    and not obj.hide_viewport
+                                    and not obj.hide_render
+                                    and (
+                                        not obj.users_collection
+                                        or any(collection in visible_collections for collection in obj.users_collection)
+                                    )
+                                )
+
+                            emit_targets = [
+                                obj for obj in context.view_layer.objects
+                                if _is_visible_context_object(obj)
+                            ]
+                        export_emit_image(context, emit_targets, camera_id=_i)
                         if need_feather:
                             render_edge_feather_mask(
                                 context, self._to_texture, _cam, _i,
@@ -1562,7 +1648,7 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
             self.show_prompt_dialog = True
             self._object_prompts = {}
             self._to_texture = [obj.name for obj in bpy.context.view_layer.objects if obj.type == 'MESH']
-            if context.scene.texture_objects == 'selected':
+            if context.scene.texture_objects in {'selected', 'selected_context'}:
                 self._to_texture = [obj.name for obj in bpy.context.selected_objects if obj.type == 'MESH']
             self.mesh_index = 0
             self.current_object_name = self._to_texture[0] if self._to_texture else ""

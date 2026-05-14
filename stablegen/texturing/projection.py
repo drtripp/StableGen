@@ -1403,10 +1403,15 @@ def project_image(context, to_project, mat_id, stop_index=1000000):
                     break
             if output:
                 # Save the node connected to the output node into a variable
-                if output.inputs[0].links[0].from_node.type == 'BSDF_PRINCIPLED':
-                    previous_node = output.inputs[0].links[0].from_node.inputs[0].links[0].from_node
-                else:
-                    previous_node = output.inputs[0].links[0].from_node
+                surface_links = output.inputs[0].links
+                if surface_links:
+                    from_node = surface_links[0].from_node
+                    if from_node.type == 'BSDF_PRINCIPLED':
+                        base_color = from_node.inputs.get("Base Color")
+                        if base_color and base_color.links:
+                            previous_node = base_color.links[0].from_node
+                    else:
+                        previous_node = from_node
             
         if not is_local_edit:
             output = nodes.new("ShaderNodeOutputMaterial")
