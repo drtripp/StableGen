@@ -2259,13 +2259,13 @@ class BakeTextures(bpy.types.Operator):
             ('lightmap', 'Lightmap Pack', 'Use Lightmap Pack with default parameters'),
             ('pack', 'Pack Islands', 'Use Pack Islands with default parameters')
         ],
-        default='smart'
+        default='none'
     ) # type: ignore
 
     add_material: bpy.props.BoolProperty(
         name="Add Material",
         description="Add the baked texture as a material to the objects",
-        default=True
+        default=False
     ) # type: ignore
 
     flatten_for_refine: bpy.props.BoolProperty(
@@ -2284,7 +2284,7 @@ class BakeTextures(bpy.types.Operator):
         name="Bake PBR Maps",
         description="Bake individual PBR channel maps (BaseColor, Roughness, Metallic, Normal, Emission, Height, AO) "
                     "with standard naming for game-engine import",
-        default=True
+        default=False
     ) # type: ignore
 
     export_orm: bpy.props.BoolProperty(
