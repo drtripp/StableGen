@@ -10,6 +10,19 @@ from . import queue as _queue_mod
 
 _ADDON_PKG = __package__.rsplit('.', 1)[0]
 
+
+class ResetStableGenState(bpy.types.Operator):
+    """Clear a stale waiting/cancel state saved into the current scene."""
+    bl_idname = "stablegen.reset_generation_state"
+    bl_label = "Reset StableGen State"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        context.scene.generation_status = 'idle'
+        context.scene.sg_last_gen_error = False
+        self.report({'INFO'}, "StableGen generation state reset to idle.")
+        return {'FINISHED'}
+
 def _is_refreshing():
     """Return True while async model-list refreshes are in-flight.
 
@@ -478,6 +491,8 @@ class StableGenPanel(bpy.types.Panel):
                             
                 elif context.scene.generation_status == 'waiting':
                     action_row.operator("object.test_stable", text="Waiting for Cancellation", icon="TIME")
+                    reset_row = layout.row()
+                    reset_row.operator("stablegen.reset_generation_state", text="Reset Stuck StableGen State", icon="LOOP_BACK")
                 else:
                     action_row.operator("object.test_stable", text="Fix Issues to Generate", icon="ERROR")
                     action_row.enabled = False

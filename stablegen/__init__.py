@@ -12,7 +12,7 @@ from .ui.presets import (
     ApplyPreset, SavePreset, DeletePreset,
     ResetQwenPrompt, SwitchToMeshGeneration,
 )
-from .ui.panel import StableGenPanel
+from .ui.panel import StableGenPanel, ResetStableGenState
 from .ui.queue import (
     SG_UL_SceneQueueList, SceneQueueAdd, SceneQueueRemove, SceneQueueClear,
     SceneQueueMoveUp, SceneQueueMoveDown, SceneQueueOpenResult,
@@ -127,6 +127,7 @@ classes = [
     DeletePreset,
     ResetQwenPrompt,
     SwitchToMeshGeneration,
+    ResetStableGenState,
     # Queue operators
     SG_UL_SceneQueueList,
     SceneQueueAdd,
