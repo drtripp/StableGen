@@ -2572,19 +2572,19 @@ class BakeTextures(bpy.types.Operator):
 
         mat = bpy.data.materials.new(name=f"{obj.name}_baked")
         obj.data.materials.append(mat)
+        material_index = len(obj.data.materials) - 1
         mat.use_nodes = True
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
         for node in nodes:
             nodes.remove(node)
 
-        # Assign the new material to all faces
-        obj.active_material_index = len(obj.material_slots) - 1
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.object.material_slot_assign()
-        bpy.ops.object.mode_set(mode='OBJECT')
+        # Assign the new material to all faces without switching modes.
+        # Mode-switching immediately after Cycles baking has caused Blender
+        # crashes in local-edit workflows.
+        obj.active_material_index = material_index
+        for poly in obj.data.polygons:
+            poly.material_index = material_index
 
         # Output node
         output_node = nodes.new("ShaderNodeOutputMaterial")
@@ -2602,7 +2602,7 @@ class BakeTextures(bpy.types.Operator):
         uv_node = nodes.new("ShaderNodeUVMap")
         if "BakeUV" in [uv.name for uv in obj.data.uv_layers]:
             uv_node.uv_map = "BakeUV"
-        else:
+        elif obj.data.uv_layers:
             uv_node.uv_map = obj.data.uv_layers[0].name
         uv_node.location = (-600, 0)
 
