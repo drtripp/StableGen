@@ -182,6 +182,7 @@ GEN_PARAMETERS = [
     "sg_use_custom_camera_order",
     "generation_mode",
     "texture_objects",
+    "sg_omit_selected_from_control_maps",
     "use_flux_lora",
     "qwen_use_trellis2_style",
     "qwen_trellis2_style_initial_only",

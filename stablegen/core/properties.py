@@ -1107,6 +1107,11 @@ def register_properties(update_model_list, ControlNetUnit, LoRAUnit,
         ],
         default='all', update=update_parameters
     )
+    bpy.types.Scene.sg_omit_selected_from_control_maps = bpy.props.BoolProperty(
+        name="Omit Selected From Control Maps",
+        description="Hide selected target meshes while rendering ControlNet/guidance maps, but still project generated images onto them. Useful for planes like brows and lashes.",
+        default=False, update=update_parameters
+    )
     bpy.types.Scene.use_flux_lora = bpy.props.BoolProperty(
         name="Use FLUX Depth LoRA",
         description="Use FLUX.1-Depth-dev LoRA for depth conditioning instead of ControlNet. This disables all ControlNet units.",
@@ -1547,6 +1552,7 @@ def unregister_properties(load_handler, _sg_queue_load_handler):
         'show_image_guidance_settings', 'show_masking_inpainting_settings',
         'show_mode_specific_settings',
         'generation_mode', 'early_priority_strength', 'early_priority', 'texture_objects',
+        'sg_omit_selected_from_control_maps',
         'qwen_generation_method', 'qwen_refine_use_prev_ref', 'qwen_refine_use_depth',
         'qwen_timestep_zero_ref',
         'qwen_guidance_map_type', 'qwen_voronoi_mode', 'qwen_context_render_mode',

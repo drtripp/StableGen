@@ -971,14 +971,26 @@ class ComfyUIGenerate(_PBRMixin, bpy.types.Operator):
             )
 
         def _render_with_visible_meshes_only(render_callback):
-            if context.scene.texture_objects not in {'all', 'selected_context'}:
+            use_visible_filter = context.scene.texture_objects in {'all', 'selected_context'}
+            omit_selected = getattr(context.scene, "sg_omit_selected_from_control_maps", False)
+            if not use_visible_filter and not omit_selected:
                 render_callback()
                 return
 
-            visible_meshes = {
-                obj for obj in context.view_layer.objects
-                if _is_viewport_visible_mesh(obj)
-            }
+            if use_visible_filter:
+                visible_meshes = {
+                    obj for obj in context.view_layer.objects
+                    if _is_viewport_visible_mesh(obj)
+                }
+            else:
+                visible_meshes = {
+                    obj for obj in context.scene.objects
+                    if obj.type == 'MESH' and not obj.hide_render
+                }
+
+            if omit_selected:
+                visible_meshes.difference_update(self._to_texture)
+
             hidden_restore = {}
             try:
                 for obj in context.scene.objects:

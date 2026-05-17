@@ -779,6 +779,15 @@ class StableGenPanel(bpy.types.Panel):
                 split = params_container.split(factor=0.5)
                 split.label(text="Target Objects:")
                 split.prop(scene, "texture_objects", text="")
+                if scene.texture_objects in {'selected', 'selected_context'}:
+                    row = params_container.row()
+                    row.prop(
+                        scene,
+                        "sg_omit_selected_from_control_maps",
+                        text="Omit Selected From Control Maps",
+                        toggle=True,
+                        icon="HIDE_ON",
+                    )
 
         # Helper to create collapsible sections
         def draw_collapsible_section(parent_layout, toggle_prop_name, title, icon="NONE"):
